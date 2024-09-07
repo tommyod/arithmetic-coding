@@ -141,6 +141,12 @@ class ArithmeticEncoder:
         self.HALF = self.FIRST_QUARTER * 2  # 0b1000 = 8
         self.THIRD_QUARTER = self.FIRST_QUARTER * 3  # 0b1100 = 12
 
+        # Equation on page 533 - check if there is enough precision
+        if self.total_count > int((self.TOP_VALUE + 1) / 4) + 1:
+            msg = "Insufficient precision to encode low-probability symbols."
+            msg += "\nIncrease the value of `bits` in the encoder."
+            raise Exception(msg)
+
         if self.verbose > 0:
             print("Initialized with:")
             print(
@@ -172,7 +178,8 @@ class ArithmeticEncoder:
         >>> list(encoder.decode(bits))
         ['A', 'B', '<EOM>']
         """
-        # iterable = iter(iterable)
+        if self.verbose:
+            print(" ----------------- DECODING -----------------")
 
         # Set up low and high values
         low = 0
@@ -186,61 +193,77 @@ class ArithmeticEncoder:
         first_bits = itertools.islice(iterable, self.bits)
         for i, input_bit in enumerate(first_bits, 1):
             if self.verbose:
-                print(f"\nProcessing bit {i}: {input_bit}")
-                print("-" * 32)
+                pass
+                # print(f"\nProcessing bit {i}: {input_bit}")
+                # print("-" * 32)
 
             value = (value << 1) + input_bit
             if self.verbose:
-                print(f"Value: 0b{value:0{self.bits}b} ({value})")
+                pass
+                # print(f"Value: 0b{value:0{self.bits}b} ({value})")
 
         # General loop
         while True:
+            if self.verbose:
+                print(f"\n\nHigh value: 0b{high:0{self.bits}b} ({high})")
+                print(f"Low value:  0b{low:0{self.bits}b} ({low})")
+                print(f"value:      0b{value:0{self.bits}b} ({value})")
+
             # Current range and current scaled value
             range_ = high - low + 1
             scaled_value = ((value - low + 1) * self.total_count - 1) / range_
-            if self.verbose:
-                print(f"{range_=}")
-                print(f"{scaled_value=}")
-
             symbol = search_ranges(scaled_value, self.ranges)
             yield symbol
+
+            # The symbol was the End Of Message symbol and we're done.
             if symbol == self.EOM:
                 break
 
             symbol_low, symbol_high = self.ranges[symbol]
+
             high = low + int(range_ * symbol_high / self.total_count) - 1
             low = low + int(range_ * symbol_low / self.total_count)
 
-            if self.verbose > 0:
-                self.print_state(low, high, " ")
+            if self.verbose:
+                print(
+                    f"\nValues after yielding symbol\nHigh value: 0b{high:0{self.bits}b} ({high})"
+                )
+                print(f"Low value:  0b{low:0{self.bits}b} ({low})")
+                print(f"value:      0b{value:0{self.bits}b} ({value})\n")
 
             while True:
                 if high < self.HALF:
+                    # All of `high`, `low` and `value` have 0 as the first bit.
                     if self.verbose > 0:
                         print("In bottom half of interval")
                     pass
                 elif low >= self.HALF:
+                    # All of `high`, `low` and `value` have 1 as the first bit.
                     if self.verbose > 0:
                         print("In top half of interval")
                     value -= self.HALF
                     low -= self.HALF
                     high -= self.HALF
                 elif low >= self.FIRST_QUARTER and high < self.THIRD_QUARTER:
+                    # Low is in the `second` quarter and `high` is in the third.
+
                     if self.verbose > 0:
                         print("In middle half of interval")
+                        self.print_state(low, high, " ")
+
                     value -= self.FIRST_QUARTER
                     low -= self.FIRST_QUARTER
                     high -= self.FIRST_QUARTER
                 else:
                     break
 
+                # Shift all bits one to the left, add 0 to low and 1 to high.
+                # From the input bit stream (iterable) we read the next bit,
+                # and default to 0 if the generator is exhausted.
                 low = 2 * low
                 high = 2 * high + 1
-                try:
-                    value = 2 * value + next(iterable)
-                except StopIteration:
-                    value = 2 * value
-                    break
+                value = 2 * value + next(iterable, 1)
+                assert low <= value <= high
 
                 if self.verbose > 0:
                     self.print_state(low, high, " ")
@@ -258,14 +281,11 @@ class ArithmeticEncoder:
         [1, 0, 0, 1, 1, 0, 1]
         """
         iterable = iter(iterable)
-
         bit_queue = BitQueue()  # Keep track of bits to follow
 
         # Initial low and high values for the range [low, high)
         low = 0
         high = self.TOP_VALUE
-
-        assert self.total_count <= ((high + 1) / 4) + 1  # Equation on page 533
 
         # Loop over every symbol in the input stream `iterable`
         for i, symbol in enumerate(iterable, 1):
@@ -273,23 +293,25 @@ class ArithmeticEncoder:
                 print(f"\nProcessing symbol number {i}: {repr(symbol)}")
                 print("-" * 32)
 
-            range_ = high - low + 1
-            assert range_ >= self.total_count, "Not enough precision"
-
             # Algorithm invariants
             assert low <= high
-            assert 0 <= low <= (1 << self.bits) - 1
-            assert 0 <= high <= (1 << self.bits) - 1
+            assert 0 <= low <= self.TOP_VALUE
+            assert 0 <= high <= self.TOP_VALUE
+            assert high - low > self.FIRST_QUARTER
+
+            range_ = high - low + 1
+            assert range_ >= self.total_count, "Not enough precision"
 
             if self.verbose > 0:
                 self.print_state(low, high, "")
 
             symbol_low, symbol_high = self.ranges[symbol]
 
-            # Transform the range [low, high) based on probability of symbol
-            range_ = high - low + 1
-            high = low + int((symbol_high / self.total_count) * range_) - 1
-            low = low + int((symbol_low / self.total_count) * range_)
+            # Transform the range [low, high) based on probability of symbol.
+            # Note: due to floating point issues, even the order of operations
+            # must match exactly between the encoder and decoder here.
+            high = low + int(range_ * symbol_high / self.total_count) - 1
+            low = low + int(range_ * symbol_low / self.total_count)
 
             if self.verbose > 0:
                 prob = (symbol_high - symbol_low) / self.total_count
@@ -334,7 +356,8 @@ class ArithmeticEncoder:
                         self.print_state(low, high, "   ")
 
                     # At this point we know that `low` is in the second quarter
-                    # and `high` is in the third quarter. Therefore the first
+                    # and `high` is in the third quarter (since the other IF-
+                    # statements did not trigger). Therefore the first
                     # two bits in `low` must be 01 and the first two bits in
                     # high must be 10.
 
@@ -367,40 +390,25 @@ class ArithmeticEncoder:
                     print("  New values")
                     self.print_state(low, high, "   ")
 
-        # Check that the last symbol was EOM
+        # Check that the last symbol was the End Of Message (EOM) symbol
         if symbol != self.EOM:
             raise ValueError("Last symbol must be {repr(self.EOM)}, got {repr(symbol)}")
 
-        # Finish encoding
+        # Finish encoding. If low < FIRST_QUARTER, then yield 0, else yield 1.
         bit_queue += 1
-
-        # If low < FIRST_QUARTER, then yield 0, else yield 1
         yield from bit_queue.bit_plus_follow(int(low >= self.FIRST_QUARTER))
+
+
+if __name__ == "__main__":
+    message = ["B", "A", "<EOM>"]
+    frequencies = {"A": 20, "B": 28, "<EOM>": 1}
+    encoder = ArithmeticEncoder(frequencies=frequencies, bits=8)
+    bits = list(encoder.encode(message))
+    decoded = list(encoder.decode(bits))
+    assert decoded == message
 
 
 if __name__ == "__main__":
     import doctest
 
     doctest.testmod()
-
-
-if __name__ == "__main__":
-    import random
-
-    message = ["A", "B", "B", "B", "A", "<EOM>"]
-    message = random.choices(["A", "B"], k=3) + ["<EOM>"]
-    frequencies = {"A": 5, "B": 2, "<EOM>": 1}
-
-    encoder = ArithmeticEncoder(frequencies=frequencies, verbose=1)
-
-    bits = list(encoder.encode(message))
-
-    print("Final output:", bits)
-
-    for symbol in encoder.decode(bits):
-        print(symbol)
-
-    decoded = list(encoder.decode(bits))
-    print(decoded)
-
-    assert decoded == message

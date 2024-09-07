@@ -1,5 +1,8 @@
 # arithmetic-coding
+
 Python implementation of arithmetic encoding/decoding for lossless data compression.
+
+
 
 
 
@@ -20,3 +23,7 @@ Python implementation of arithmetic encoding/decoding for lossless data compress
 >>> list(encoder.decode(bits))
 ['A', 'B', 'B', 'B', '<EOM>']
 ```
+
+
+
+https://github.com/nayuki/Reference-arithmetic-coding
