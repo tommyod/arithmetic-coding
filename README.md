@@ -22,6 +22,7 @@ Python implementation of arithmetic encoding/decoding for lossless data compress
 [0, 1, 0, 1, 1, 0, 0, 1]
 >>> list(encoder.decode(bits))
 ['A', 'B', 'B', 'B', '<EOM>']
+
 ```
 
 
