@@ -116,7 +116,7 @@ class ArithmeticEncoder:
         Examples
         --------
         >>> message = ['A', 'B', 'B', 'B', '<EOM>']
-        >>> frequencies = {'A': 1, 'B':3, '<EOM>':1}
+        >>> frequencies = {'A': 1, 'B': 3, '<EOM>': 1}
         >>> encoder = ArithmeticEncoder(frequencies=frequencies)
         >>> bits = list(encoder.encode(message))
         >>> bits
@@ -167,7 +167,7 @@ class ArithmeticEncoder:
         Examples
         --------
         >>> bits = [1, 0, 0, 1, 1, 0, 1]
-        >>> frequencies = {'A': 5, 'B':2, '<EOM>':1}
+        >>> frequencies = {'A': 5, 'B': 2, '<EOM>': 1}
         >>> encoder = ArithmeticEncoder(frequencies=frequencies)
         >>> list(encoder.decode(bits))
         ['A', 'B', '<EOM>']
@@ -252,7 +252,7 @@ class ArithmeticEncoder:
         Examples
         --------
         >>> message = iter(['A', 'B', '<EOM>'])
-        >>> frequencies = {'A': 5, 'B':2, '<EOM>':1}
+        >>> frequencies = {'A': 5, 'B': 2, '<EOM>': 1}
         >>> encoder = ArithmeticEncoder(frequencies=frequencies)
         >>> list(encoder.encode(message))
         [1, 0, 0, 1, 1, 0, 1]
