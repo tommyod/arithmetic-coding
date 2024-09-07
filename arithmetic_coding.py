@@ -67,6 +67,9 @@ class BitQueue:
     >>> bitqueue += 3
     >>> list(bitqueue.bit_plus_follow(0))
     [0, 1, 1, 1]
+    >>> bitqueue += 2
+    >>> list(bitqueue.bit_plus_follow(1))
+    [1, 0, 0]
     """
 
     bits_to_follow = 0
