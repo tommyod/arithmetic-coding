@@ -23,10 +23,18 @@ class TestArithmeticEncoder:
         bits = list(encoder.encode(message))
         assert bits == [1, 0, 1, 1, 1, 0]
 
+    def test_on_very_infrequent_symbol(self):
+        message = ["A"] * 1000 + ["B"] + ["<EOM>"]
+        frequencies = {"A": 1000, "B": 1, "<EOM>": 1}
+        encoder = ArithmeticEncoder(frequencies=frequencies, bits=12)
+        bits = list(encoder.encode(message))
+        assert len(bits) == 24  # Encodes ~1000 symbols in 24 bits only
+        assert list(encoder.decode(bits)) == message
+
     @pytest.mark.parametrize("seed", range(99))
-    @pytest.mark.parametrize("bits", [6, 7, 8])
+    @pytest.mark.parametrize("bits", [6, 7, 8, 12, 16])
     def test_encoding_and_decoding_random_messages(self, seed, bits):
-        random_generator = random.Random(seed)
+        random_generator = random.Random(seed * 1000 + bits)
         k = random_generator.randint(0, 99)
 
         # Generate a random message of random length
