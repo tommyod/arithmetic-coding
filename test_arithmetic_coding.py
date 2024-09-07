@@ -1,9 +1,6 @@
-#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Sat Sep  7 08:10:08 2024
-
-@author: tommy
+Tests for arithmetic encoder.
 """
 
 import pytest
