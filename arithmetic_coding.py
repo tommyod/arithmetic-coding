@@ -58,6 +58,29 @@ def print_table(low, high, bits):
         print(f" 0b{number:0{bits}b} ({number})")
 
 
+class BitQueue:
+    """ "A queue to keep track of bits to follow.
+
+    Examples
+    --------
+    >>> bitqueue = BitQueue()
+    >>> bitqueue += 3
+    >>> list(bitqueue.bit_plus_follow(0))
+    [0, 1, 1, 1]
+    """
+
+    bits_to_follow = 0
+
+    def __add__(self, bits):
+        self.bits_to_follow += bits
+        return self
+
+    def bit_plus_follow(self, bit):
+        yield bit
+        yield from itertools.repeat(int(not bit), times=self.bits_to_follow)
+        self.bits_to_follow = 0
+
+
 class ArithmeticEncoder:
     """An implementation of the arithmetic encoder based on:
 
@@ -114,7 +137,6 @@ class ArithmeticEncoder:
         self.FIRST_QUARTER = (self.TOP_VALUE >> 2) + 1  # 0b0100 = 4
         self.HALF = self.FIRST_QUARTER * 2  # 0b1000 = 8
         self.THIRD_QUARTER = self.FIRST_QUARTER * 3  # 0b1100 = 12
-        self.bits_to_follow = 0  # Counter
 
         if self.verbose > 0:
             print("Initialized with:")
@@ -136,12 +158,6 @@ class ArithmeticEncoder:
         print(prefix + f"Low value:  0b{low:0{self.bits}b} ({low})")
         print(prefix + f"Range: [{low}, {high + 1}) Width: {range_}", end=end)
 
-    def bit_plus_follow(self, bit):
-        """Yield the bit, then yield opposite bits `self.bits_to_follow` times."""
-        yield bit
-        yield from itertools.repeat(int(not bit), times=self.bits_to_follow)
-        self.bits_to_follow = 0  # Reset the counter
-
     def decode(self, iterable):
         """Decode an iterable of bits (0/1), yielding symbols.
 
@@ -162,8 +178,8 @@ class ArithmeticEncoder:
         # Consume the first `self.bits` into the `value` variable.
         # For instance, if iterable = [0, 1, 0, 1] and self.bits = 6,
         # then value = 0b010100 after this step
-        iterable = itertools.chain(iter(iterable), itertools.repeat(0))
         value = 0
+        iterable = itertools.chain(iter(iterable), itertools.repeat(0))
         first_bits = itertools.islice(iterable, self.bits)
         for i, input_bit in enumerate(first_bits, 1):
             if self.verbose:
@@ -240,6 +256,8 @@ class ArithmeticEncoder:
         """
         iterable = iter(iterable)
 
+        bit_queue = BitQueue()  # Keep track of bits to follow
+
         # Initial low and high values for the range [low, high)
         low = 0
         high = self.TOP_VALUE
@@ -287,7 +305,7 @@ class ArithmeticEncoder:
                         self.print_state(low, high, "   ")
                     # Since HALF > `high` > `low`, both `high` and `low` have
                     # 0 in the first bit. We output this 0 bit.
-                    yield from self.bit_plus_follow(bit=0)
+                    yield from bit_queue.bit_plus_follow(bit=0)
 
                 # Case (2): The first bits are both 0
                 elif low >= self.HALF:
@@ -297,7 +315,7 @@ class ArithmeticEncoder:
 
                     # Since `high` > `low` >= HALF, both `high` and `low` have
                     # 0 as the first bit. We output this 1 bit.
-                    yield from self.bit_plus_follow(bit=1)
+                    yield from bit_queue.bit_plus_follow(bit=1)
 
                     # HALF is 0b1000..., and we remove the first bit from
                     # both `low` and `high`. An example:
@@ -332,7 +350,7 @@ class ArithmeticEncoder:
                     # the first bit converges to a value. Once the first value
                     # converges and we yield it, we must follow with an opposite
                     # bit. The number of opposite bits are `bits_to_follow`.
-                    self.bits_to_follow += 1
+                    bit_queue += 1
                 else:
                     break  # Skip the bit shifting below the IF-statement
 
@@ -351,10 +369,10 @@ class ArithmeticEncoder:
             raise ValueError("Last symbol must be {repr(self.EOM)}, got {repr(symbol)}")
 
         # Finish encoding
-        self.bits_to_follow += 1
+        bit_queue += 1
 
         # If low < FIRST_QUARTER, then yield 0, else yield 1
-        yield from self.bit_plus_follow(int(low >= self.FIRST_QUARTER))
+        yield from bit_queue.bit_plus_follow(int(low >= self.FIRST_QUARTER))
 
 
 if __name__ == "__main__":
