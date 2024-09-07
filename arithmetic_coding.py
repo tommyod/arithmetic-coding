@@ -59,7 +59,7 @@ def print_table(low, high, bits):
 
 
 class BitQueue:
-    """ "A queue to keep track of bits to follow.
+    """A queue to keep track of bits to follow.
 
     Examples
     --------
