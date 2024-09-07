@@ -79,20 +79,21 @@ class TestArithmeticEncoder:
         bits = list(encoder.encode(message))
         decoded = list(encoder.decode(bits))
         assert decoded == message
-        
+
     def test_a_one_million_length_message(self):
         random_generator = random.Random(42)
-        
-        message = random_generator.choices(string.ascii_letters, k=10**6) 
-        frequencies = {l:random_generator.randint(1, 99) for l in string.ascii_letters}
-        
+
+        message = random_generator.choices(string.ascii_letters, k=10**6)
+        frequencies = {
+            letter: random_generator.randint(1, 99) for letter in string.ascii_letters
+        }
+
         message = message + ["<EOM>"]
         frequencies["<EOM>"] = 1
-        
+
         encoder = ArithmeticEncoder(frequencies=frequencies, bits=14)
         decoded = list(encoder.decode(encoder.encode(message)))
         assert decoded == message
-        
 
     def test_that_different_number_of_bits_in_buffer_can_give_different_output_bits(
         self
