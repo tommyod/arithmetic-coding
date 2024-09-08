@@ -1,26 +1,56 @@
 # -*- coding: utf-8 -*-
 """
-
-References
-----------
-
-https://marknelson.us/posts/2014/10/19/data-compression-with-arithmetic-coding.html
-https://marknelson.us/posts/1991/02/01/arithmetic-coding-statistical-modeling-data-compression
-https://marknelson.us/posts/2014/10/19/data-compression-with-arithmetic-coding.html
-
-https://www.cs.cmu.edu/~aarti/Class/10704/Intro_Arith_coding.pdf
+This module implements a ArithmeticEncoder class for encoding and decoding.
 
 
 
+Minimal example
+===============
 
-0xFFFF has 16**4 = (2**4)**4 = 2**16 = 16 bits
-There are 8 bits in one byte, so it has 2 bytes.
+Create a message, which is an iterable consisting of hashable symbols.
+
+>>> message = ['A', 'B', 'B', 'B', '<EOM>']
+
+Create frequency counts - the model needs to know how common each symbol is.
+The essential compression idea is that high-frequency symbols get fewers bits.
+
+>>> frequencies = {'A': 1, 'B': 3, '<EOM>': 1}
+
+Now create the encoder and encoe the message.
+
+>>> encoder = ArithmeticEncoder(frequencies=frequencies)
+>>> bits = list(encoder.encode(message))
+>>> bits
+[0, 1, 0, 1, 1, 0, 0, 1]
+
+Verify that decoding brings back the original message.
+
+>>> list(encoder.decode(bits))
+['A', 'B', 'B', 'B', '<EOM>']
 
 
+Compression of infrequent symbols
+=================================
+
+Here is an example with many common letters. In 'Crime and Punishment' by 
+Fyodor Dostoyevsky the symbol 'e' is around 136 times more frequent than 'q'.
+
+>>> import random
+>>> rng = random.Random(42)
+>>> message = rng.choices(['e', 'q'], weights=[136, 1], k=10_000) + ["<EOM>"]
+>>> frequencies = {'e': 13600, 'q': 100, '<EOM>': 1}
+
+The 10_000 symbols are compressed to a small number of bits
+
+>>> encoder = ArithmeticEncoder(frequencies=frequencies, bits=16)
+>>> bits = list(encoder.encode(message))
+>>> len(bits)
+676
 
 """
 
 import itertools
+
 
 
 def ranges_from_frequencies(frequencies):
@@ -406,38 +436,14 @@ class ArithmeticEncoder:
 
 
 if __name__ == "__main__":
-    if False:
-        message = ["B", "A", "A", "A", "<EOM>"]
-        frequencies = {"A": 20, "B": 28, "<EOM>": 1}
-        encoder = ArithmeticEncoder(frequencies=frequencies, bits=8, verbose=1)
-        bits = list(encoder.encode(message))
-        decoded = list(encoder.decode(bits))
-        assert decoded == message
-
-    if False:
-        import requests
-        import collections
-        import math
-
-        url = "https://www.gutenberg.org/cache/epub/2554/pg2554.txt"
-        response = requests.get(url)
-        message = list(response.text) + ["<EOM>"]
-
-        # Then use collections.Counter as before
-        frequencies = collections.Counter(message)
-        f = {s: 1 for s in frequencies.keys()}
-        encoder = ArithmeticEncoder(frequencies=f, bits=32, verbose=0)
-        bits = list(encoder.encode(list(message)))
-
-        print(len(message))
-        print(len(bits))
-
-        total = sum(frequencies.values())
-        probs = {s: c / total for (s, c) in frequencies.items()}
-        shannon_bound = sum(
-            frequencies[s] * math.log2(1 / probs[s]) for s in frequencies.keys()
-        )
-        print(shannon_bound)
+    
+    # An example
+    message = ["B", "A", "A", "A", "<EOM>"]
+    frequencies = {"A": 20, "B": 28, "<EOM>": 1}
+    encoder = ArithmeticEncoder(frequencies=frequencies, bits=8, verbose=1)
+    bits = list(encoder.encode(message))
+    decoded = list(encoder.decode(bits))
+    assert decoded == message
 
 
 if __name__ == "__main__":
