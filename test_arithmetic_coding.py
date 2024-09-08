@@ -13,7 +13,7 @@ class TestArithmeticEncoder:
     def test_encoding_only_EOM(self):
         message = ["<EOM>"]
         frequencies = {"<EOM>": 1}
-        encoder = ArithmeticEncoder(frequencies=frequencies)
+        encoder = ArithmeticEncoder(frequencies=frequencies, bits=6)
         bits = list(encoder.encode(message))
         decoded = list(encoder.decode(bits))
         assert decoded == message
@@ -21,7 +21,7 @@ class TestArithmeticEncoder:
     def test_encoding_only_EOM_with_other_frequencies(self):
         message = ["<EOM>"]
         frequencies = {"<EOM>": 1, "A": 3, "B": 5}
-        encoder = ArithmeticEncoder(frequencies=frequencies)
+        encoder = ArithmeticEncoder(frequencies=frequencies, bits=6)
         bits = list(encoder.encode(message))
         decoded = list(encoder.decode(bits))
         assert decoded == message
@@ -29,14 +29,14 @@ class TestArithmeticEncoder:
     def test_encoding_on_simple_example_1(self):
         message = ["A", "<EOM>"]
         frequencies = {"A": 2, "B": 2, "C": 2, "<EOM>": 1}
-        encoder = ArithmeticEncoder(frequencies=frequencies)
+        encoder = ArithmeticEncoder(frequencies=frequencies, bits=6)
         bits = list(encoder.encode(message))
         assert bits == [0, 0, 1, 0, 1, 0]
 
     def test_encoding_on_simple_example_2(self):
         message = ["C", "<EOM>"]
         frequencies = {"A": 2, "B": 2, "C": 2, "<EOM>": 1}
-        encoder = ArithmeticEncoder(frequencies=frequencies)
+        encoder = ArithmeticEncoder(frequencies=frequencies, bits=6)
         bits = list(encoder.encode(message))
         assert bits == [1, 0, 1, 1, 1, 0]
 
@@ -139,4 +139,9 @@ class TestArithmeticEncoder:
 
 
 if __name__ == "__main__":
-    pytest.main([__file__, "-v", "-x"])
+    pytest.main(
+        [
+            __file__,
+            "-v",
+        ]
+    )
