@@ -52,36 +52,57 @@ The 10_000 symbols are compressed to a small number of bits
 import itertools
 
 
+class NaiveCumulativeSum:
+    """Cumulative sum with slow asymptotic performance."""
 
-def ranges_from_frequencies(frequencies):
-    """Build a dictionary of ranges from a dictionary of frequencies.
+    def __init__(self, frequencies):
+        """Create cumulative sum in O(n) time."""
+        self.frequencies = frequencies
+        self.ranges = dict(self.ranges_from_frequencies(self.frequencies))
 
-    Examples
-    --------
-    >>> dict(ranges_from_frequencies({'a':5, 'b':3, 'c':2}))
-    {'a': (0, 5), 'b': (5, 8), 'c': (8, 10)}
-    """
-    cumsum = 0
-    for symbol, frequency in sorted(frequencies.items()):
-        yield (symbol, (cumsum, cumsum + frequency))
-        cumsum += frequency
+    def get_low_high(self, symbol):
+        """Get (low, high) for symbol in O(1) time."""
+        return self.ranges[symbol]
 
+    def update_count(self, symbol, frequency):
+        """Update count in O(n) time."""
+        self.frequencies[symbol] = frequency
+        self.ranges = self.ranges_from_frequencies(self.frequencies)
 
-def search_ranges(value, ranges):
-    """Find symbol such that low <= value < high.
+    def total_count(self):
+        """Get sum of all frequencies in O(n) time."""
+        return sum(self.frequencies.values())
 
-    Examples
-    --------
-    >>> ranges = {'a': (0, 5), 'b': (5, 8), 'c': (8, 10)}
-    >>> search_ranges(2, ranges)
-    'a'
-    >>> search_ranges(5, ranges)
-    'b'
-    """
-    for symbol, (low, high) in ranges.items():
-        if low <= value < high:
-            return symbol
-    raise ValueError("Could not locate value in ranges.")
+    @staticmethod
+    def ranges_from_frequencies(frequencies):
+        """Build a dictionary of ranges from a dictionary of frequencies.
+
+        Examples
+        --------
+        >>> freq = {'a': 5, 'b': 3, 'c': 2}
+        >>> dict(NaiveCumulativeSum.ranges_from_frequencies(freq))
+        {'a': (0, 5), 'b': (5, 8), 'c': (8, 10)}
+        """
+        cumsum = 0
+        for symbol, frequency in sorted(frequencies.items()):
+            yield (symbol, (cumsum, cumsum + frequency))
+            cumsum += frequency
+
+    def search_ranges(self, value):
+        """Find symbol such that low <= value < high in O(n) time.
+
+        Examples
+        --------
+        >>> cumsum = NaiveCumulativeSum({'a': 5, 'b': 3, 'c': 2})
+        >>> cumsum.search_ranges(2)
+        'a'
+        >>> cumsum.search_ranges(5)
+        'b'
+        """
+        for symbol, (low, high) in self.ranges.items():
+            if low <= value < high:
+                return symbol
+        raise ValueError("Could not locate value in ranges.")
 
 
 def print_table(low, high, bits):
@@ -163,9 +184,8 @@ class ArithmeticEncoder:
         self.bits = bits
         self.verbose = verbose
 
-        # Build ranges from frequencies
-        self.ranges = dict(ranges_from_frequencies(self.frequencies))
-        self.total_count = sum(self.frequencies.values())
+        # Build cumulative sum from frequencies
+        self.cumsum = NaiveCumulativeSum(dict(frequencies))
 
         # The total range. Examples in comments are with 4 bits
         self.TOP_VALUE = (1 << self.bits) - 1  # 0b1111 = 15
@@ -174,7 +194,7 @@ class ArithmeticEncoder:
         self.THIRD_QUARTER = self.FIRST_QUARTER * 3  # 0b1100 = 12
 
         # Equation on page 533 - check if there is enough precision
-        if self.total_count > int((self.TOP_VALUE + 1) / 4) + 1:
+        if self.cumsum.total_count() > int((self.TOP_VALUE + 1) / 4) + 1:
             msg = "Insufficient precision to encode low-probability symbols."
             msg += "\nIncrease the value of `bits` in the encoder."
             raise Exception(msg)
@@ -192,7 +212,6 @@ class ArithmeticEncoder:
             print(
                 f" FIRST_QUARTER = 0b{self.FIRST_QUARTER:0{self.bits}b} ({self.FIRST_QUARTER})"
             )
-            print(f" total_count   = {self.total_count}")
 
     def _print_state(self, low, high, value=None, *, prefix=" ", end="\n"):
         range_ = high - low + 1
@@ -235,24 +254,25 @@ class ArithmeticEncoder:
             assert 0 <= low <= high <= self.TOP_VALUE
             assert low < self.HALF <= high
             assert high - low > self.FIRST_QUARTER
-            assert range_ >= self.total_count, "Not enough precision"
+            assert range_ >= self.cumsum.total_count(), "Not enough precision"
 
             # Print current state of the low and high values
             if self.verbose > 0:
                 self._print_state(low, high, prefix="")
 
             # Get the symbol counts (non-normalized cumulative probabilities)
-            symbol_low, symbol_high = self.ranges[symbol]
+            symbol_low, symbol_high = self.cumsum.get_low_high(symbol)
 
             # Transform the range [low, high) based on probability of symbol.
             # Note: due to floating point issues, even the order of operations
             # must match EXACTLY between the encoder and decoder here.
-            high = low + int(range_ * symbol_high / self.total_count) - 1
-            low = low + int(range_ * symbol_low / self.total_count)
+            total_count = self.cumsum.total_count()
+            high = low + int(range_ * symbol_high / total_count) - 1
+            low = low + int(range_ * symbol_low / total_count)
 
             # Print state of low and high after transforming
             if self.verbose > 0:
-                prob = (symbol_high - symbol_low) / self.total_count
+                prob = (symbol_high - symbol_low) / total_count
                 print(f"\nTransformed range (prob. of symbol '{symbol}': {prob:.4f}):")
                 self._print_state(low, high, prefix="", end="\n\n")
 
@@ -377,14 +397,16 @@ class ArithmeticEncoder:
 
             # Current range and current scaled value
             range_ = high - low + 1
-            scaled_value = ((value - low + 1) * self.total_count - 1) / range_
-            symbol = search_ranges(scaled_value, self.ranges)
+            total_count = self.cumsum.total_count()
+            scaled_value = ((value - low + 1) * total_count - 1) / range_
+            symbol = self.cumsum.search_ranges(scaled_value)
             yield symbol
 
             # Scale high and low. This mimicks (reverses) the encoder process
-            symbol_low, symbol_high = self.ranges[symbol]
-            high = low + int(range_ * symbol_high / self.total_count) - 1
-            low = low + int(range_ * symbol_low / self.total_count)
+            symbol_low, symbol_high = self.cumsum.get_low_high(symbol)
+            total_count = self.cumsum.total_count()
+            high = low + int(range_ * symbol_high / total_count) - 1
+            low = low + int(range_ * symbol_low / total_count)
 
             if self.verbose:
                 print(f"After yielding symbol '{symbol}' and scaling:")
@@ -436,7 +458,6 @@ class ArithmeticEncoder:
 
 
 if __name__ == "__main__":
-    
     # An example
     message = ["B", "A", "A", "A", "<EOM>"]
     frequencies = {"A": 20, "B": 28, "<EOM>": 1}
