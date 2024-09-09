@@ -27,7 +27,7 @@ Here's an example showing how to use the `ArithmeticEncoder`.
 >>> encoder = ArithmeticEncoder(frequencies=frequencies)
 >>> bits = list(encoder.encode(message))
 >>> bits
-[0, 1, 0, 1, 1, 0, 0, 1]
+[0, 1, 0, 1, 1, 1, 0, 0]
 >>> list(encoder.decode(bits))
 ['A', 'B', 'B', 'B', '<EOM>']
 

@@ -1,63 +1,56 @@
 # -*- coding: utf-8 -*-
 """
-
-References
-----------
-
-https://marknelson.us/posts/2014/10/19/data-compression-with-arithmetic-coding.html
-https://marknelson.us/posts/1991/02/01/arithmetic-coding-statistical-modeling-data-compression
-https://marknelson.us/posts/2014/10/19/data-compression-with-arithmetic-coding.html
-
-https://www.cs.cmu.edu/~aarti/Class/10704/Intro_Arith_coding.pdf
+This module implements a ArithmeticEncoder class for encoding and decoding.
 
 
+Minimal example
+===============
+
+Create a message, which is an iterable consisting of hashable symbols.
+
+>>> message = ['A', 'B', 'B', 'B', '<EOM>']
+
+Create frequency counts - the model needs to know how common each symbol is.
+The essential compression idea is that high-frequency symbols get fewers bits.
+
+>>> frequencies = {'A': 1, 'B': 3, '<EOM>': 1}
+
+Now create the encoder and encoe the message.
+
+>>> encoder = ArithmeticEncoder(frequencies=frequencies, bits=6)
+>>> bits = list(encoder.encode(message))
+>>> bits
+[0, 1, 0, 1, 1, 0, 0, 1]
+
+Verify that decoding brings back the original message.
+
+>>> list(encoder.decode(bits))
+['A', 'B', 'B', 'B', '<EOM>']
 
 
-0xFFFF has 16**4 = (2**4)**4 = 2**16 = 16 bits
-There are 8 bits in one byte, so it has 2 bytes.
+Compression of infrequent symbols
+=================================
 
+Here is an example with many common letters. In 'Crime and Punishment' by 
+Fyodor Dostoyevsky the symbol 'e' is around 136 times more frequent than 'q'.
 
+>>> import random
+>>> rng = random.Random(42)
+>>> message = rng.choices(['e', 'q'], weights=[136, 1], k=10_000) + ["<EOM>"]
+>>> frequencies = {'e': 13600, 'q': 100, '<EOM>': 1}
+
+The 10_000 symbols are compressed to a small number of bits
+
+>>> encoder = ArithmeticEncoder(frequencies=frequencies, bits=16)
+>>> bits = list(encoder.encode(message))
+>>> len(bits)
+676
 
 """
 
 import itertools
-
-
-def ranges_from_frequencies(frequencies):
-    """Build a dictionary of ranges from a dictionary of frequencies.
-
-    Examples
-    --------
-    >>> dict(ranges_from_frequencies({'a':5, 'b':3, 'c':2}))
-    {'a': (0, 5), 'b': (5, 8), 'c': (8, 10)}
-    """
-    cumsum = 0
-    for symbol, frequency in sorted(frequencies.items()):
-        yield (symbol, (cumsum, cumsum + frequency))
-        cumsum += frequency
-
-
-def search_ranges(value, ranges):
-    """Find symbol such that low <= value < high.
-
-    Examples
-    --------
-    >>> ranges = {'a': (0, 5), 'b': (5, 8), 'c': (8, 10)}
-    >>> search_ranges(2, ranges)
-    'a'
-    >>> search_ranges(5, ranges)
-    'b'
-    """
-    for symbol, (low, high) in ranges.items():
-        if low <= value < high:
-            return symbol
-    raise ValueError("Could not locate value in ranges.")
-
-
-def print_table(low, high, bits):
-    """Print binary representation of numbers in range [low, high]."""
-    for number in reversed(range(low, high + 1)):
-        print(f" 0b{number:0{bits}b} ({number})")
+import copy
+from fenwick import CumulativeSum
 
 
 class BitQueue:
@@ -101,7 +94,7 @@ class ArithmeticEncoder:
     cases, since the language is too slow and too high-level.
     """
 
-    def __init__(self, frequencies, *, bits=6, verbose=0, EOM="<EOM>"):
+    def __init__(self, frequencies, *, bits=16, verbose=0, EOM="<EOM>"):
         """Initialize an arithmetic encoder/decoder.
 
         Parameters
@@ -119,23 +112,41 @@ class ArithmeticEncoder:
         --------
         >>> message = ['A', 'B', 'B', 'B', '<EOM>']
         >>> frequencies = {'A': 1, 'B': 3, '<EOM>': 1}
-        >>> encoder = ArithmeticEncoder(frequencies=frequencies)
+        >>> encoder = ArithmeticEncoder(frequencies=frequencies, bits=6)
         >>> bits = list(encoder.encode(message))
         >>> bits
         [0, 1, 0, 1, 1, 0, 0, 1]
         >>> list(encoder.decode(bits))
         ['A', 'B', 'B', 'B', '<EOM>']
+
+        Instead of using fixed frequencies, it's possible to use a simple
+        dynamic probability model by passing a list of symbols as `frequencies`.
+        The initial frequency of every symbol will then be 1, and as the model
+        sees each symbol in the message it updates the frequencies. The decoder
+        reverses this process.
+
+        >>> message = ['R', 'N', '<EOM>']
+        >>> frequencies = list(set(message))
+        >>> encoder = ArithmeticEncoder(frequencies=frequencies)
+        >>> bits = list(encoder.encode(message))
+        >>> list(encoder.decode(bits)) == message
+        True
+
         """
         self.EOM = EOM
-        assert self.EOM in frequencies.keys()
-        assert all(isinstance(freq, int) for freq in frequencies.values())
-        self.frequencies = frequencies
+        self.frequencies = frequencies.copy()
         self.bits = bits
         self.verbose = verbose
 
-        # Build ranges from frequencies
-        self.ranges = dict(ranges_from_frequencies(self.frequencies))
-        self.total_count = sum(self.frequencies.values())
+        # Build cumulative sum from frequencies
+        if isinstance(frequencies, dict):
+            assert all(isinstance(freq, int) for freq in self.frequencies.values())
+            assert self.EOM in self.frequencies.keys()
+            self.cumsum = CumulativeSum(dict(frequencies), update=False)
+        elif isinstance(frequencies, (list, set)):
+            assert self.EOM in self.frequencies
+            frequencies = {symbol: 1 for symbol in self.frequencies}
+            self.cumsum = CumulativeSum(frequencies, update=True)
 
         # The total range. Examples in comments are with 4 bits
         self.TOP_VALUE = (1 << self.bits) - 1  # 0b1111 = 15
@@ -144,7 +155,7 @@ class ArithmeticEncoder:
         self.THIRD_QUARTER = self.FIRST_QUARTER * 3  # 0b1100 = 12
 
         # Equation on page 533 - check if there is enough precision
-        if self.total_count > int((self.TOP_VALUE + 1) / 4) + 1:
+        if self.cumsum.total_count() > int((self.TOP_VALUE + 1) / 4) + 1:
             msg = "Insufficient precision to encode low-probability symbols."
             msg += "\nIncrease the value of `bits` in the encoder."
             raise Exception(msg)
@@ -162,7 +173,6 @@ class ArithmeticEncoder:
             print(
                 f" FIRST_QUARTER = 0b{self.FIRST_QUARTER:0{self.bits}b} ({self.FIRST_QUARTER})"
             )
-            print(f" total_count   = {self.total_count}")
 
     def _print_state(self, low, high, value=None, *, prefix=" ", end="\n"):
         range_ = high - low + 1
@@ -186,6 +196,11 @@ class ArithmeticEncoder:
         if self.verbose:
             print("------------------------ ENCODING ------------------------")
 
+        # Work with a copy of the cumulative sum, in case encoding/decoding
+        # works in lockstep. If we use: encoder.decode(encoder.encode(msg))
+        # and we do not take a copy, then encoder/decoder mutate the same obj.
+        cumsum = copy.deepcopy(self.cumsum)
+
         bit_queue = BitQueue()  # Keep track of bits to follow
 
         # Initial low and high values for the range [low, high)
@@ -202,27 +217,31 @@ class ArithmeticEncoder:
             range_ = high - low + 1
 
             # Algorithm invariants
+            if range_ < cumsum.total_count():
+                msg = "Insufficient precision to encode low-probability symbols."
+                msg += "\nIncrease the value of `bits` in the encoder."
+                raise Exception(msg)
             assert 0 <= low <= high <= self.TOP_VALUE
             assert low < self.HALF <= high
             assert high - low > self.FIRST_QUARTER
-            assert range_ >= self.total_count, "Not enough precision"
 
             # Print current state of the low and high values
             if self.verbose > 0:
                 self._print_state(low, high, prefix="")
 
             # Get the symbol counts (non-normalized cumulative probabilities)
-            symbol_low, symbol_high = self.ranges[symbol]
+            symbol_low, symbol_high = cumsum.get_low_high(symbol)
 
             # Transform the range [low, high) based on probability of symbol.
             # Note: due to floating point issues, even the order of operations
             # must match EXACTLY between the encoder and decoder here.
-            high = low + int(range_ * symbol_high / self.total_count) - 1
-            low = low + int(range_ * symbol_low / self.total_count)
+            total_count = cumsum.total_count()
+            high = low + int(range_ * symbol_high / total_count) - 1
+            low = low + int(range_ * symbol_low / total_count)
 
             # Print state of low and high after transforming
             if self.verbose > 0:
-                prob = (symbol_high - symbol_low) / self.total_count
+                prob = (symbol_high - symbol_low) / total_count
                 print(f"\nTransformed range (prob. of symbol '{symbol}': {prob:.4f}):")
                 self._print_state(low, high, prefix="", end="\n\n")
 
@@ -299,6 +318,9 @@ class ArithmeticEncoder:
                     print("  New values for high and low")
                     self._print_state(low, high, prefix="   ")
 
+            # Increase the frequency of `symbol` if dynamic probability model
+            cumsum.add_count(symbol, 1)
+
         # Check that the last symbol was the End Of Message (EOM) symbol
         if symbol != self.EOM:
             raise ValueError("Last symbol must be {repr(self.EOM)}, got {repr(symbol)}")
@@ -322,6 +344,8 @@ class ArithmeticEncoder:
         """
         if self.verbose:
             print("------------------------ DECODING ------------------------")
+
+        cumsum = copy.deepcopy(self.cumsum)  # Take copy
 
         # Set up low, current value and high
         low = 0
@@ -347,14 +371,19 @@ class ArithmeticEncoder:
 
             # Current range and current scaled value
             range_ = high - low + 1
-            scaled_value = ((value - low + 1) * self.total_count - 1) / range_
-            symbol = search_ranges(scaled_value, self.ranges)
+            total_count = cumsum.total_count()
+            scaled_value = ((value - low + 1) * total_count - 1) / range_
+            symbol = cumsum.search_ranges(scaled_value)
             yield symbol
 
             # Scale high and low. This mimicks (reverses) the encoder process
-            symbol_low, symbol_high = self.ranges[symbol]
-            high = low + int(range_ * symbol_high / self.total_count) - 1
-            low = low + int(range_ * symbol_low / self.total_count)
+            symbol_low, symbol_high = cumsum.get_low_high(symbol)
+            total_count = cumsum.total_count()
+            high = low + int(range_ * symbol_high / total_count) - 1
+            low = low + int(range_ * symbol_low / total_count)
+
+            # Increase the frequency of `symbol` if dynamic probability model
+            cumsum.add_count(symbol, 1)
 
             if self.verbose:
                 print(f"After yielding symbol '{symbol}' and scaling:")
@@ -406,38 +435,20 @@ class ArithmeticEncoder:
 
 
 if __name__ == "__main__":
-    if False:
-        message = ["B", "A", "A", "A", "<EOM>"]
-        frequencies = {"A": 20, "B": 28, "<EOM>": 1}
-        encoder = ArithmeticEncoder(frequencies=frequencies, bits=8, verbose=1)
-        bits = list(encoder.encode(message))
-        decoded = list(encoder.decode(bits))
-        assert decoded == message
+    # An example
+    message = ["B", "A", "A", "A", "<EOM>"]
+    frequencies = list(set(message))
+    encoder = ArithmeticEncoder(frequencies=frequencies, bits=8)
+    bits = list(encoder.encode(message))
+    decoded = list(encoder.decode(bits))
+    assert decoded == message
 
-    if False:
-        import requests
-        import collections
-        import math
-
-        url = "https://www.gutenberg.org/cache/epub/2554/pg2554.txt"
-        response = requests.get(url)
-        message = list(response.text) + ["<EOM>"]
-
-        # Then use collections.Counter as before
-        frequencies = collections.Counter(message)
-        f = {s: 1 for s in frequencies.keys()}
-        encoder = ArithmeticEncoder(frequencies=f, bits=32, verbose=0)
-        bits = list(encoder.encode(list(message)))
-
-        print(len(message))
-        print(len(bits))
-
-        total = sum(frequencies.values())
-        probs = {s: c / total for (s, c) in frequencies.items()}
-        shannon_bound = sum(
-            frequencies[s] * math.log2(1 / probs[s]) for s in frequencies.keys()
-        )
-        print(shannon_bound)
+    # Another example
+    message = ["R", "N", "<EOM>"]
+    frequencies = list(set(message))
+    encoder = ArithmeticEncoder(frequencies=frequencies, bits=14)
+    bits = list(encoder.encode(message))
+    decoded = list(encoder.decode(bits))
 
 
 if __name__ == "__main__":
