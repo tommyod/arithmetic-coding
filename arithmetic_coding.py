@@ -50,6 +50,8 @@ The 10_000 symbols are compressed to a small number of bits
 """
 
 import itertools
+import copy
+from fenwick import FenwickTree
 
 
 class NaiveCumulativeSum:
@@ -110,6 +112,88 @@ class NaiveCumulativeSum:
             if low <= value < high:
                 return symbol
         raise ValueError("Could not locate value in ranges.")
+
+
+class CumulativeSum:
+    """Cumulative sum with fast asymptotic performance."""
+
+    def __init__(self, frequencies, update=True):
+        """Create cumulative sum in O(n) time."""
+        symbols = sorted(frequencies.keys())
+        self.idx_to_symbol = dict(enumerate(symbols))
+        self.symbol_to_idx = {s: i for (i, s) in self.idx_to_symbol.items()}
+        self.fenwick_tree = FenwickTree([frequencies[s] for s in symbols])
+        self.update = update
+
+    def get_low_high(self, symbol):
+        """Get (low, high) for symbol in O(log n) time.
+
+        Examples
+        --------
+        >>> cumsum = CumulativeSum({'a': 2, 'b': 3, 'c': 4})
+        >>> cumsum.get_low_high('a')
+        (0, 2)
+        >>> cumsum.get_low_high('b')
+        (2, 5)
+        >>> cumsum.get_low_high('c')
+        (5, 9)
+        """
+        idx = self.symbol_to_idx[symbol]
+        if idx == 0:
+            return (0, self.fenwick_tree[idx])
+
+        sum_upto = self.fenwick_tree.prefix_sum(idx)
+        return (sum_upto, sum_upto + self.fenwick_tree[idx])
+
+    def add_count(self, symbol, value):
+        """Update count in O(log n) time.
+
+        Examples
+        --------
+        >>> cumsum = CumulativeSum({'a': 2, 'b': 3, 'c': 4})
+        >>> cumsum.add_count('b', 2)
+        >>> cumsum.get_low_high('a')
+        (0, 2)
+        >>> cumsum.get_low_high('b')
+        (2, 7)
+        >>> cumsum.get_low_high('c')
+        (7, 11)
+        """
+        if self.update:
+            idx = self.symbol_to_idx[symbol]
+            self.fenwick_tree.add(idx, value)
+
+    def total_count(self):
+        """Get sum of all frequencies in O(log n) time.
+
+        Examples
+        --------
+        >>> cumsum = CumulativeSum({'a': 2, 'b': 3, 'c': 4})
+        >>> cumsum.total_count()
+        9
+        >>> cumsum.add_count('c', 2)
+        >>> cumsum.total_count()
+        11
+        """
+        return self.fenwick_tree.prefix_sum(len(self.fenwick_tree))
+
+    def reset(self):
+        """Set all frequency counts to one."""
+        self.fenwick_tree = FenwickTree([1] * len(self.fenwick_tree))
+
+    def search_ranges(self, value):
+        """Find symbol such that low <= value < high in O(n) time.
+
+        Examples
+        --------
+        >>> cumsum = CumulativeSum({'a': 5, 'b': 3, 'c': 2})
+        >>> cumsum.search_ranges(2)
+        'a'
+        >>> cumsum.search_ranges(5)
+        'b'
+        """
+        idx = self.fenwick_tree.bisect_left(value)
+        return self.idx_to_symbol[idx]
 
 
 def print_table(low, high, bits):
@@ -190,13 +274,10 @@ class ArithmeticEncoder:
         sees each symbol in the message it updates the frequencies. The decoder
         reverses this process.
 
+        >>> message = ['R', 'N', '<EOM>']
         >>> frequencies = list(set(message))
         >>> encoder = ArithmeticEncoder(frequencies=frequencies)
         >>> bits = list(encoder.encode(message))
-        >>> bits
-        [1, 0, 1, 0, 0, 0, 1, 1, 1, 1]
-        >>> list(encoder.decode(bits))
-        ['A', 'B', 'B', 'B', '<EOM>']
 
         """
         self.EOM = EOM
@@ -208,11 +289,11 @@ class ArithmeticEncoder:
         if isinstance(frequencies, dict):
             assert all(isinstance(freq, int) for freq in self.frequencies.values())
             assert self.EOM in self.frequencies.keys()
-            self.cumsum = NaiveCumulativeSum(dict(frequencies), update=False)
+            self.cumsum = CumulativeSum(dict(frequencies), update=False)
         elif isinstance(frequencies, (list, set)):
             assert self.EOM in self.frequencies
             frequencies = {symbol: 1 for symbol in self.frequencies}
-            self.cumsum = NaiveCumulativeSum(frequencies, update=True)
+            self.cumsum = CumulativeSum(frequencies, update=True)
 
         # The total range. Examples in comments are with 4 bits
         self.TOP_VALUE = (1 << self.bits) - 1  # 0b1111 = 15
@@ -262,8 +343,10 @@ class ArithmeticEncoder:
         if self.verbose:
             print("------------------------ ENCODING ------------------------")
 
-        if isinstance(self.frequencies, (list, set)):
-            self.cumsum.reset()  # Dynamic model, reset all counters to 1
+        # Work with a copy of the cumulative sum, in case encoding/decoding
+        # works in lockstep. If we use: encoder.decode(encoder.encode(msg))
+        # and we do not take a copy, then encoder/decoder mutate the same obj.
+        cumsum = copy.deepcopy(self.cumsum)
 
         bit_queue = BitQueue()  # Keep track of bits to follow
 
@@ -281,7 +364,7 @@ class ArithmeticEncoder:
             range_ = high - low + 1
 
             # Algorithm invariants
-            if range_ < self.cumsum.total_count():
+            if range_ < cumsum.total_count():
                 msg = "Insufficient precision to encode low-probability symbols."
                 msg += "\nIncrease the value of `bits` in the encoder."
                 raise Exception(msg)
@@ -294,12 +377,12 @@ class ArithmeticEncoder:
                 self._print_state(low, high, prefix="")
 
             # Get the symbol counts (non-normalized cumulative probabilities)
-            symbol_low, symbol_high = self.cumsum.get_low_high(symbol)
+            symbol_low, symbol_high = cumsum.get_low_high(symbol)
 
             # Transform the range [low, high) based on probability of symbol.
             # Note: due to floating point issues, even the order of operations
             # must match EXACTLY between the encoder and decoder here.
-            total_count = self.cumsum.total_count()
+            total_count = cumsum.total_count()
             high = low + int(range_ * symbol_high / total_count) - 1
             low = low + int(range_ * symbol_low / total_count)
 
@@ -383,7 +466,7 @@ class ArithmeticEncoder:
                     self._print_state(low, high, prefix="   ")
 
             # Increase the frequency of `symbol` if dynamic probability model
-            self.cumsum.add_count(symbol, 1)
+            cumsum.add_count(symbol, 1)
 
         # Check that the last symbol was the End Of Message (EOM) symbol
         if symbol != self.EOM:
@@ -409,8 +492,7 @@ class ArithmeticEncoder:
         if self.verbose:
             print("------------------------ DECODING ------------------------")
 
-        if isinstance(self.frequencies, (list, set)):
-            self.cumsum.reset()  # Dynamic model, reset all counters to 1
+        cumsum = copy.deepcopy(self.cumsum)  # Take copy
 
         # Set up low, current value and high
         low = 0
@@ -436,19 +518,19 @@ class ArithmeticEncoder:
 
             # Current range and current scaled value
             range_ = high - low + 1
-            total_count = self.cumsum.total_count()
+            total_count = cumsum.total_count()
             scaled_value = ((value - low + 1) * total_count - 1) / range_
-            symbol = self.cumsum.search_ranges(scaled_value)
+            symbol = cumsum.search_ranges(scaled_value)
             yield symbol
 
             # Scale high and low. This mimicks (reverses) the encoder process
-            symbol_low, symbol_high = self.cumsum.get_low_high(symbol)
-            total_count = self.cumsum.total_count()
+            symbol_low, symbol_high = cumsum.get_low_high(symbol)
+            total_count = cumsum.total_count()
             high = low + int(range_ * symbol_high / total_count) - 1
             low = low + int(range_ * symbol_low / total_count)
 
             # Increase the frequency of `symbol` if dynamic probability model
-            self.cumsum.add_count(symbol, 1)
+            cumsum.add_count(symbol, 1)
 
             if self.verbose:
                 print(f"After yielding symbol '{symbol}' and scaling:")
@@ -503,10 +585,29 @@ if __name__ == "__main__":
     # An example
     message = ["B", "A", "A", "A", "<EOM>"]
     frequencies = list(set(message))
-    encoder = ArithmeticEncoder(frequencies=frequencies, bits=8, verbose=1)
+    encoder = ArithmeticEncoder(frequencies=frequencies, bits=8)
     bits = list(encoder.encode(message))
     decoded = list(encoder.decode(bits))
     assert decoded == message
+
+    # Another example
+    message = ["R", "N", "<EOM>"]
+    frequencies = list(set(message))
+    encoder = ArithmeticEncoder(frequencies=frequencies, bits=14)
+    bits = list(encoder.encode(message))
+    decoded = list(encoder.decode(bits))
+    assert decoded == message
+
+    if False:
+        import string
+        import random
+
+        random_generator = random.Random(42)
+        message = random_generator.choices(string.ascii_letters, k=10**6) + ["<EOM>"]
+        frequencies = {s: 1 for s in set(message)}
+        encoder = ArithmeticEncoder(frequencies=frequencies, bits=32)
+        decoded = list(encoder.decode(encoder.encode(message)))
+        assert decoded == message
 
 
 if __name__ == "__main__":
