@@ -55,23 +55,30 @@ import itertools
 class NaiveCumulativeSum:
     """Cumulative sum with slow asymptotic performance."""
 
-    def __init__(self, frequencies):
+    def __init__(self, frequencies, update=True):
         """Create cumulative sum in O(n) time."""
-        self.frequencies = frequencies
+        self.frequencies = dict(frequencies)
         self.ranges = dict(self.ranges_from_frequencies(self.frequencies))
+        self.update = update
 
     def get_low_high(self, symbol):
         """Get (low, high) for symbol in O(1) time."""
         return self.ranges[symbol]
 
-    def update_count(self, symbol, frequency):
+    def add_count(self, symbol, value):
         """Update count in O(n) time."""
-        self.frequencies[symbol] = frequency
-        self.ranges = self.ranges_from_frequencies(self.frequencies)
+        if self.update:
+            self.frequencies[symbol] += value
+            self.ranges = dict(self.ranges_from_frequencies(self.frequencies))
 
     def total_count(self):
         """Get sum of all frequencies in O(n) time."""
         return sum(self.frequencies.values())
+
+    def reset(self):
+        """Set all frequency counts to one."""
+        self.frequencies = {frequency: 1 for frequency in self.frequencies}
+        self.ranges = dict(self.ranges_from_frequencies(self.frequencies))
 
     @staticmethod
     def ranges_from_frequencies(frequencies):
@@ -176,16 +183,36 @@ class ArithmeticEncoder:
         [0, 1, 0, 1, 1, 0, 0, 1]
         >>> list(encoder.decode(bits))
         ['A', 'B', 'B', 'B', '<EOM>']
+
+        Instead of using fixed frequencies, it's possible to use a simple
+        dynamic probability model by passing a list of symbols as `frequencies`.
+        The initial frequency of every symbol will then be 1, and as the model
+        sees each symbol in the message it updates the frequencies. The decoder
+        reverses this process.
+
+        >>> frequencies = list(set(message))
+        >>> encoder = ArithmeticEncoder(frequencies=frequencies)
+        >>> bits = list(encoder.encode(message))
+        >>> bits
+        [1, 0, 1, 0, 0, 0, 1, 1, 1, 1]
+        >>> list(encoder.decode(bits))
+        ['A', 'B', 'B', 'B', '<EOM>']
+
         """
         self.EOM = EOM
-        assert self.EOM in frequencies.keys()
-        assert all(isinstance(freq, int) for freq in frequencies.values())
-        self.frequencies = frequencies
+        self.frequencies = frequencies.copy()
         self.bits = bits
         self.verbose = verbose
 
         # Build cumulative sum from frequencies
-        self.cumsum = NaiveCumulativeSum(dict(frequencies))
+        if isinstance(frequencies, dict):
+            assert all(isinstance(freq, int) for freq in self.frequencies.values())
+            assert self.EOM in self.frequencies.keys()
+            self.cumsum = NaiveCumulativeSum(dict(frequencies), update=False)
+        elif isinstance(frequencies, (list, set)):
+            assert self.EOM in self.frequencies
+            frequencies = {symbol: 1 for symbol in self.frequencies}
+            self.cumsum = NaiveCumulativeSum(frequencies, update=True)
 
         # The total range. Examples in comments are with 4 bits
         self.TOP_VALUE = (1 << self.bits) - 1  # 0b1111 = 15
@@ -235,6 +262,9 @@ class ArithmeticEncoder:
         if self.verbose:
             print("------------------------ ENCODING ------------------------")
 
+        if isinstance(self.frequencies, (list, set)):
+            self.cumsum.reset()  # Dynamic model, reset all counters to 1
+
         bit_queue = BitQueue()  # Keep track of bits to follow
 
         # Initial low and high values for the range [low, high)
@@ -251,10 +281,13 @@ class ArithmeticEncoder:
             range_ = high - low + 1
 
             # Algorithm invariants
+            if range_ < self.cumsum.total_count():
+                msg = "Insufficient precision to encode low-probability symbols."
+                msg += "\nIncrease the value of `bits` in the encoder."
+                raise Exception(msg)
             assert 0 <= low <= high <= self.TOP_VALUE
             assert low < self.HALF <= high
             assert high - low > self.FIRST_QUARTER
-            assert range_ >= self.cumsum.total_count(), "Not enough precision"
 
             # Print current state of the low and high values
             if self.verbose > 0:
@@ -349,6 +382,9 @@ class ArithmeticEncoder:
                     print("  New values for high and low")
                     self._print_state(low, high, prefix="   ")
 
+            # Increase the frequency of `symbol` if dynamic probability model
+            self.cumsum.add_count(symbol, 1)
+
         # Check that the last symbol was the End Of Message (EOM) symbol
         if symbol != self.EOM:
             raise ValueError("Last symbol must be {repr(self.EOM)}, got {repr(symbol)}")
@@ -372,6 +408,9 @@ class ArithmeticEncoder:
         """
         if self.verbose:
             print("------------------------ DECODING ------------------------")
+
+        if isinstance(self.frequencies, (list, set)):
+            self.cumsum.reset()  # Dynamic model, reset all counters to 1
 
         # Set up low, current value and high
         low = 0
@@ -407,6 +446,9 @@ class ArithmeticEncoder:
             total_count = self.cumsum.total_count()
             high = low + int(range_ * symbol_high / total_count) - 1
             low = low + int(range_ * symbol_low / total_count)
+
+            # Increase the frequency of `symbol` if dynamic probability model
+            self.cumsum.add_count(symbol, 1)
 
             if self.verbose:
                 print(f"After yielding symbol '{symbol}' and scaling:")
@@ -460,7 +502,7 @@ class ArithmeticEncoder:
 if __name__ == "__main__":
     # An example
     message = ["B", "A", "A", "A", "<EOM>"]
-    frequencies = {"A": 20, "B": 28, "<EOM>": 1}
+    frequencies = list(set(message))
     encoder = ArithmeticEncoder(frequencies=frequencies, bits=8, verbose=1)
     bits = list(encoder.encode(message))
     decoded = list(encoder.decode(bits))

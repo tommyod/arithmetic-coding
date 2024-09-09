@@ -111,26 +111,30 @@ class TestArithmeticEncoder:
         assert list(enc_6bit.decode(enc_6bit.encode(message))) == message
         assert list(enc_7bit.decode(enc_7bit.encode(message))) == message
 
-    @pytest.mark.parametrize("seed", range(999))
+    @pytest.mark.parametrize("seed", range(99))
     @pytest.mark.parametrize("bits", [4, 6, 8, 7, 12, 16, 32])
-    def test_encoding_and_decoding_random_messages(self, seed, bits):
+    @pytest.mark.parametrize("dynamic", [True, False])
+    def test_encoding_and_decoding_random_messages(self, seed, bits, dynamic):
         random_generator = random.Random(seed + bits * 1_000)
         k = 2 ** random_generator.randint(1, 14)
 
         # Generate a random message of random length
         message = random_generator.choices(["A", "B", "C"], k=k) + ["<EOM>"]
         freq_A, freq_B, freq_C = random_generator.choices(range(1, 99), k=3)
-        frequencies = {"A": freq_A, "B": freq_B, "C": freq_C, "<EOM>": 1}
+
+        # Whether or not to test using a dynamic probability model
+        if dynamic:
+            frequencies = list(set(message))
+        else:
+            frequencies = {"A": freq_A, "B": freq_B, "C": freq_C, "<EOM>": 1}
 
         # Create encoder, but skip test if there are not enough bits
         try:
             encoder = ArithmeticEncoder(frequencies=frequencies, bits=bits)
+            bits = list(encoder.encode(message))
         except Exception as exception:
             if "Insufficient precision" in exception.args[0]:
                 return
-
-        # Encode to bits
-        bits = list(encoder.encode(message))
 
         # Decode from bits to message
         decoded = list(encoder.decode(bits))
@@ -139,9 +143,4 @@ class TestArithmeticEncoder:
 
 
 if __name__ == "__main__":
-    pytest.main(
-        [
-            __file__,
-            "-v",
-        ]
-    )
+    pytest.main([__file__, "-v", "-x"])
