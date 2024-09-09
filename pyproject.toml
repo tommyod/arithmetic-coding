@@ -1,0 +1,10 @@
+[tool.poetry]
+name = "arithmetic-coding"
+version = "0.0.1"
+description = ""
+authors = ["tommyod <http://tommyodland.com/>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+pytest = "^8"

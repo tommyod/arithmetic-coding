@@ -48,8 +48,9 @@ The 10_000 symbols are compressed to a small number of bits
 
 """
 
-import itertools
 import copy
+import itertools
+
 from fenwick import CumulativeSum
 
 

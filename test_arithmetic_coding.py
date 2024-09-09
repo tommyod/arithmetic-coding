@@ -3,10 +3,12 @@
 Tests for arithmetic encoder.
 """
 
-import pytest
 import random
-from arithmetic_coding import ArithmeticEncoder
 import string
+
+import pytest
+
+from arithmetic_coding import ArithmeticEncoder
 
 
 class TestArithmeticEncoder:
@@ -109,7 +111,7 @@ class TestArithmeticEncoder:
         assert decoded == message
 
     def test_that_different_number_of_bits_in_buffer_can_give_different_output_bits(
-        self
+        self,
     ):
         message = ["A", "<EOM>"]
         frequencies = {"A": 6, "<EOM>": 1}
