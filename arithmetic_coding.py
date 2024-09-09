@@ -17,7 +17,7 @@ The essential compression idea is that high-frequency symbols get fewers bits.
 
 Now create the encoder and encoe the message.
 
->>> encoder = ArithmeticEncoder(frequencies=frequencies)
+>>> encoder = ArithmeticEncoder(frequencies=frequencies, bits=6)
 >>> bits = list(encoder.encode(message))
 >>> bits
 [0, 1, 0, 1, 1, 0, 0, 1]
@@ -94,7 +94,7 @@ class ArithmeticEncoder:
     cases, since the language is too slow and too high-level.
     """
 
-    def __init__(self, frequencies, *, bits=6, verbose=0, EOM="<EOM>"):
+    def __init__(self, frequencies, *, bits=16, verbose=0, EOM="<EOM>"):
         """Initialize an arithmetic encoder/decoder.
 
         Parameters
@@ -112,7 +112,7 @@ class ArithmeticEncoder:
         --------
         >>> message = ['A', 'B', 'B', 'B', '<EOM>']
         >>> frequencies = {'A': 1, 'B': 3, '<EOM>': 1}
-        >>> encoder = ArithmeticEncoder(frequencies=frequencies)
+        >>> encoder = ArithmeticEncoder(frequencies=frequencies, bits=6)
         >>> bits = list(encoder.encode(message))
         >>> bits
         [0, 1, 0, 1, 1, 0, 0, 1]
@@ -129,6 +129,8 @@ class ArithmeticEncoder:
         >>> frequencies = list(set(message))
         >>> encoder = ArithmeticEncoder(frequencies=frequencies)
         >>> bits = list(encoder.encode(message))
+        >>> list(encoder.decode(bits)) == message
+        True
 
         """
         self.EOM = EOM

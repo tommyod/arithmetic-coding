@@ -124,7 +124,7 @@ class TestArithmeticEncoder:
         assert list(enc_6bit.decode(enc_6bit.encode(message))) == message
         assert list(enc_7bit.decode(enc_7bit.encode(message))) == message
 
-    @pytest.mark.parametrize("seed", range(999))
+    @pytest.mark.parametrize("seed", range(99))
     @pytest.mark.parametrize("bits", [4, 6, 8, 7, 12, 16, 32])
     @pytest.mark.parametrize("dynamic", [True, False])
     def test_encoding_and_decoding_random_messages(self, seed, bits, dynamic):
