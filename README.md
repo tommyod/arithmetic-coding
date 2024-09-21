@@ -2,6 +2,8 @@
 
 Python implementation of arithmetic encoding/decoding for lossless data compression.
 
+[**Read a blog post about this implementation here.**](https://tommyodland.com/articles/2024/arithmetic-coding-in-python/)
+
 ## Overview
 
 This project provides a clean, correct, and modern Python implementation of the arithmetic coding algorithm. 
